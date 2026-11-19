@@ -67,22 +67,15 @@ class ResultStore:
         return result
 
     def read_published(self, key: TriggerKey) -> PublishedResult | None:
+        """Return only a formally committed result; half-accepted evidence is pending."""
         row = self._db.execute("""
             SELECT result_id, batch_id, trigger_id, left_seq, right_seq,
                    left_reading, right_reading, difference
             FROM published_results WHERE batch_id = ? AND trigger_id = ?
         """, (key.batch_id, key.trigger_id)).fetchone()
-        if row is not None:
-            return _result_from_row(row)
-        draft = self._db.execute("""
-            SELECT first_lane, first_reading FROM plate_evidence
-            WHERE batch_id = ? AND trigger_id = ? AND left_seq IS NULL
-        """, (key.batch_id, key.trigger_id)).fetchone()
-        if draft is None:
+        if row is None:
             return None
-        lane, reading = draft[0], decode_count(draft[1])
-        left, right = (reading, None) if lane == LaneId.LEFT.value else (None, reading)
-        return PublishedResult(None, key, Contrast(left, right, None), None, None)
+        return _result_from_row(row)
 
     def read_published_batch(self, batch_id: str) -> dict[str, PublishedResult]:
         rows = self._db.execute("""

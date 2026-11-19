@@ -15,6 +15,13 @@ class CaptureStep:
 
 
 def step(binding: RecordingBinding, evidence: EvidenceLedger, lane_id: LaneId) -> CaptureStep | None:
+    """Hand off the current plate, then release it so this lane exposes its next slot.
+
+    A lane has a single slot; the next plate of that lane only appears after the
+    current one is released.  Acceptance and release are separate durable writes:
+    a failed acceptance leaves the slot untouched, while a failed release leaves
+    the accepted evidence in place so the same plate can be retried.
+    """
     lane = binding.lane(lane_id)
     slot = lane.read_current()
     if slot is None:
@@ -22,13 +29,5 @@ def step(binding: RecordingBinding, evidence: EvidenceLedger, lane_id: LaneId) -
     plate = validate_current_plate(binding.manifest, slot)
     handoff = accept_current_plate(evidence, slot, plate)
     token = confirm_release_eligibility(slot, handoff)
-    boards = evidence.read_trigger(plate.key)
-    if len(boards) != 2:
-        return CaptureStep(handoff, lane.current_position, False)
-    partner = next(board for board in boards if board.origin.lane is not lane_id)
-    peer_lane = binding.lane(partner.origin.lane)
-    peer_slot = peer_lane.read_current()
-    if peer_slot is not None and peer_slot.plate == partner and peer_slot.matches_plate(partner):
-        peer_lane.release_current(peer_slot.token)
     advanced = lane.release_current(token)
     return CaptureStep(handoff, advanced.next_position, advanced.exhausted)
